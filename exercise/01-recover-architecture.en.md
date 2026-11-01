@@ -38,15 +38,20 @@ Check **at least five** dependencies in Run B's table against the files. Open th
 
 | Caller → Callee | AI's evidence | Verified? ✅ / ❌ / ❓ | What you found |
 |---|---|---|---|
-| | | | |
-| | | | |
-| | | | |
-| | | | |
-| | | | |
+| `frontend` → `cartservice` | `frontend.yaml` (`CART_SERVICE_ADDR`) | ✅ | `CART_SERVICE_ADDR=cartservice:7070` is in `frontend.yaml` line 73 |
+| `checkoutservice` → `emailservice` | `checkoutservice.yaml` (`EMAIL_SERVICE_ADDR`) | ✅ | Env var is at line 63, and `main.go` really calls `SendOrderConfirmation` (line 380) |
+| `checkoutservice` → `paymentservice` | `checkoutservice.yaml` (`PAYMENT_SERVICE_ADDR`) | ✅ | Env var at line 61, and `chargeCard` calls `Charge` in `main.go` (line 370) |
+| `recommendationservice` → `productcatalogservice` | `recommendationservice.yaml` (`PRODUCT_CATALOG_SERVICE_ADDR`) | ✅ | Env var at line 60. `recommendation_server.py` also creates a `ProductCatalogServiceStub` (line 136) |
+| `cartservice` → `redis-cart` | `cartservice.yaml` (`REDIS_ADDR`) | ✅ | `REDIS_ADDR=redis-cart:6379` at line 50, and `Startup.cs` reads `REDIS_ADDR` (line 29) |
+| `loadgenerator` → `frontend` | `loadgenerator.yaml` (`FRONTEND_ADDR`) | ❓ | The dependency is real, but `loadgenerator.yaml` is commented out in `kustomization.yaml`, so it isn't deployed by default. It's a test tool, not really part of the system |
 
-- **Wrong or missing** in Run B (false dependencies, missing ones, containers to question): …
+- **Wrong or missing** in Run B:
+  - Missing: `frontend` → `shoppingassistantservice`. The AI saw `SHOPPING_ASSISTANT_SERVICE_ADDR` in `frontend.yaml` but left it out because no manifest deploys it. The service does exist in `src/shoppingassistantservice/`, and the frontend calls it over **HTTP**, not gRPC (`src/frontend/handlers.go` line 464). So it's an optional part, but not a fake one.
+  - Questionable: `loadgenerator` is drawn inside the system boundary even though it's optional and only generates test traffic.
+  - Not wrong, but the env vars only show that a service *can* reach another. They don't show which calls are made or in what order. For example, checkout calls payment, then shipping, then email in sequence (`main.go` `PlaceOrder`), which the diagram can't show.
+  - Languages are all "not evidenced". The source folders show a mix (e.g. Go for checkout, Python for recommendation, C# for cart), which the manifests alone couldn't tell.
 
 ## Reflect (2–3 sentences each)
 
-1. Compare A and B. What could the agent **not** know from the `.proto` file alone, and why?
-2. Which **one** mistake would mislead a new team member most if the diagram were published without checking?
+1. From the `.proto` file alone the agent could only list the 9 services and what each one offers. It couldn't tell who calls whom, that there is a Redis store for the cart, or that the frontend is the entry point, because a proto file describes interfaces, not how they're wired together. The manifests filled that gap through the `*_ADDR` env vars.
+2. Leaving out `shoppingassistantservice` would mislead a new team member most. They would think the frontend only talks to gRPC services, when it also makes an HTTP call to a service that only runs when an optional component is turned on. Someone debugging the frontend could easily miss it.

@@ -33,10 +33,12 @@ requirement: <paste R-12 here>
 
 | Criterion | Run a | Run b |
 |---|---|---|
-| Uses the scenario's numbers (latency, peak, MailFast limits)? | | |
-| Options considered (list them) | | |
-| Handles "exactly once" loyalty points and MailFast's rate limit? How? | | |
-| Anything invented (a number, tool or fact not in the scenario)? | | |
+| Uses the scenario's numbers (latency, peak, MailFast limits)? | No. It didn't have them, so it listed them as open questions instead | Yes, all of them: 500 ms p95, 200 orders/s, MailFast 1.5 s / 8 s / 0.5 % / 50 per s, loyalty within 1 min. It also worked out that the email backlog grows by 9,000 per minute at peak |
+| Options considered (list them) | A: direct sync calls, B: event via a message broker, C: an orchestrator service | 1: sync gRPC like today, 2: goroutines inside checkout, 3: RabbitMQ event, 4: Kafka event |
+| Handles "exactly once" loyalty points and MailFast's rate limit? How? | Only in general terms: "make consumers idempotent using the order ID" and "retry with backoff". No rate limit, because it didn't know MailFast has one | Yes. `loyaltyservice` de-duplicates on order ID and acks after commit; the email consumer caps MailFast calls at 50/s across replicas, with a dead-letter queue |
+| Anything invented (a number, tool or fact not in the scenario)? | Nothing invented. It labelled the one guess about `emailservice` as [Assumption]. But it didn't pick a broker, so the decision is too vague to act on | Nothing invented that I found. The `main.go` line numbers I checked are right. The "few milliseconds" publish cost is marked [Inferred]. It does reuse the Locust `loadgenerator` idea from ADR-0001 |
+
+Run a was reasonable, but generic: it could fit almost any shop. Run b was much more specific, because the numbers and team skills made RabbitMQ the clear choice over Kafka.
 
 ## Take ownership: your final ADR
 
@@ -49,6 +51,7 @@ You will defend this ADR in front of a review board in Part B, so make sure you 
 
 | # | What you changed from the AI's draft | Why |
 |---|---|---|
-| 1 | | |
-| 2 | | |
-| 3 | | |
+| 1 | Took fraud scoring out of the "just add a new queue next year" list and said it needs its own ADR | A fraud check is only useful before the card is charged. Running it after the order is placed can't stop anything, so the AI's claim that every future action is just a new subscriber was wrong for this one |
+| 2 | Changed what happens when the publish to RabbitMQ fails: retry, then log the full event and alert so it can be replayed. I accepted the small remaining risk for v1 | The draft just logged and moved on, which means points can be lost and breaks "exactly once". A full outbox needs a new database for checkout, which felt like too much for now |
+| 3 | Added an example of how late emails get at peak (10-minute peak → about 90,000 emails, last ones roughly 30 min late) and said the PO must accept it or we ask MailFast for a higher limit | The draft said "emails will be late" but not how late. A number makes it a real trade-off someone has to sign off on |
+| 4 | Filled in Deciders, removed the agent line at the top | It's my ADR now |
